@@ -9,7 +9,7 @@ export function Media({ o, ratio }: { o: Output; ratio?: string }) {
   return <img src={o.url} alt="" loading="lazy" />;
 }
 
-function downloadName(job: Job, o: Output, i: number) {
+export function downloadName(job: Job, o: Output, i: number) {
   const ext = o.url.split("?")[0].split(".").pop() || (o.type === "video" ? "mp4" : "png");
   return `ristretto-${job.spec}-${job.id.replace(/^job_/, "")}${job.outputs.length > 1 ? `-${i + 1}` : ""}.${ext}`;
 }
@@ -40,10 +40,11 @@ export function useRunner() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const run = useCallback(async (body: Record<string, unknown>) => {
+  const run = useCallback(async (body: Record<string, unknown>, onSubmit?: (job: Job) => void) => {
     setError(""); setBusy(true);
     try {
       const j = await submitJob(body);
+      onSubmit?.(j);
       setJobs((p) => [j, ...p]);
       setBusy(false);
       const done = await waitForJob(j.id, (t) => setJobs((p) => p.map((x) => (x.id === t.id ? t : x))));

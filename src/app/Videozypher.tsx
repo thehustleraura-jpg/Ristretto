@@ -1,22 +1,40 @@
-import { useState } from "react";
-import { placeholder, uploadFile, useCatalog } from "../lib/api";
-import { JobCard, Uploader, useRunner } from "./shared";
+import { useRef, useState } from "react";
+import { placeholder, uploadFile, useCatalog, type Job } from "../lib/api";
+import { JobCard, Media, Uploader, downloadName, useRunner } from "./shared";
 
 type Cast = { id: number; kind: "person" | "object"; label: string; photos: string[] };
+// What the reference side of the preview shows; captured per job so it stays paired with its recast.
+type Snap = { key: string; title: string; seconds: number; ratio: string; aspect: string; preview: string; video: boolean; castLabel: string };
+
+const RATIO_OPTIONS = ["16:9", "9:16", "1:1", "4:5", "3:4", "3:2", "2:3"];
+const nearestRatio = (w: number, h: number) =>
+  RATIO_OPTIONS.reduce((best, r) => { const [a, b] = r.split(":").map(Number); const [x, y] = best.split(":").map(Number); return Math.abs(a / b - w / h) < Math.abs(x / y - w / h) ? r : best; });
+const cssAspect = (r: string) => r.replace(":", " / ");
 
 export function VideozypherApp() {
   const { references } = useCatalog();
   const [refId, setRefId] = useState(references[0].id);
-  const [upload, setUpload] = useState<{ url: string; seconds: number } | null>(null);
+  const [upload, setUpload] = useState<{ url: string; seconds: number; w: number; h: number } | null>(null);
   const [upErr, setUpErr] = useState("");
   const [cast, setCast] = useState<Cast[]>([{ id: 1, kind: "person", label: "Person 1", photos: [] }]);
   const [prompt, setPrompt] = useState("");
+  const [snaps, setSnaps] = useState<Record<string, Snap>>({});
+  const pairRef = useRef<HTMLDivElement>(null);
   const { jobs, run, error, busy } = useRunner();
 
   const ref = references.find((r) => r.id === refId)!;
   const seconds = upload ? upload.seconds : ref.seconds;
   const photoCount = cast.reduce((n, c) => n + c.photos.length, 0);
   const valid = cast.length > 0 && cast.every((c) => c.photos.length >= 1) && photoCount <= 9;
+  const ratio = upload ? nearestRatio(upload.w, upload.h) : ref.ratio;
+  const current: Snap = upload
+    ? { key: upload.url, title: "Your clip", seconds: upload.seconds, ratio, aspect: `${upload.w} / ${upload.h}`, preview: upload.url, video: true, castLabel: "" }
+    : { key: ref.id, title: ref.title, seconds: ref.seconds, ratio, aspect: cssAspect(ref.ratio), preview: placeholder(ref.seed, ref.ratio, ref.title), video: false, castLabel: "" };
+  // The pair shows the latest job while its reference is still selected; otherwise the new selection with an empty recast slot.
+  const latest = jobs[0];
+  const paired = latest && snaps[latest.id]?.key === current.key ? latest : undefined;
+  const shown = paired ? snaps[paired.id] : current;
+  const recent = jobs.filter((j) => j !== paired);
 
   async function pickClip(f: File | undefined) {
     if (!f) return;
@@ -26,10 +44,11 @@ export function VideozypherApp() {
     probe.preload = "metadata";
     probe.src = objUrl;
     const dur = await new Promise<number>((res, rej) => { probe.onloadedmetadata = () => res(probe.duration); probe.onerror = () => rej(new Error("Could not read this video")); }).catch((e) => { setUpErr(e.message); return 0; });
+    const w = probe.videoWidth || 16, h = probe.videoHeight || 9;
     URL.revokeObjectURL(objUrl);
     if (!dur) return;
     if (dur < 4 || dur > 30) { setUpErr(`Clip is ${dur.toFixed(1)}s. Use a clip between 4 and 30 seconds.`); return; }
-    try { setUpload({ url: await uploadFile(f), seconds: Math.round(dur) }); } catch (e: any) { setUpErr(e.message); }
+    try { setUpload({ url: await uploadFile(f), seconds: Math.round(dur), w, h }); } catch (e: any) { setUpErr(e.message); }
   }
 
   const update = (id: number, patch: Partial<Cast>) => setCast(cast.map((c) => (c.id === id ? { ...c, ...patch } : c)));
@@ -83,14 +102,59 @@ export function VideozypherApp() {
             <span className="mono">3 · Output</span>
             <div className="row"><span className="chip">Match source · {seconds}s</span><span className="chip">1080p</span><span className="chip">Audio kept</span></div>
             {error && <div className="err">{error}</div>}
-            <button className="btn primary lg" disabled={busy || !valid} onClick={() => run({ kind: "videozypher", reference: upload ? upload.url : ref.id, cast: cast.map((c) => ({ label: c.label, kind: c.kind, photos: c.photos })), prompt, seconds, ratio: ref.ratio })}>
+            <button className="btn primary lg" disabled={busy || !valid} onClick={() => {
+              const snap = { ...current, castLabel: cast.map((c) => c.label.trim() || (c.kind === "person" ? "Person" : "Object")).join(" + ") };
+              run({ kind: "videozypher", reference: upload ? upload.url : ref.id, cast: cast.map((c) => ({ label: c.label, kind: c.kind, photos: c.photos })), prompt, seconds, ratio }, (j) => {
+                setSnaps((m) => ({ ...m, [j.id]: snap }));
+                const r = pairRef.current?.getBoundingClientRect();
+                if (r && (r.top < 0 || r.top > window.innerHeight * 0.4)) pairRef.current!.scrollIntoView({ behavior: "smooth", block: "start" });
+              });
+            }}>
               {busy ? "Submitting…" : "Generate"}
             </button>
             <p className="note" style={{ margin: 0 }}>Use photos of people who agreed to appear and label the result as AI-generated.</p>
           </div>
         </div>
-        <div>{jobs.length === 0 ? <div className="card pad note">Your recast videos appear here.</div> : <div className="result-grid">{jobs.map((j) => <JobCard key={j.id} job={j} />)}</div>}</div>
+        <div className="stack">
+          <div className="pair" ref={pairRef} style={{ scrollMarginTop: 80 }}>
+            <div className="result">
+              <div className="frame" style={{ aspectRatio: shown.aspect }}>
+                <span className="tag">REFERENCE</span>
+                {shown.video ? <video src={shown.preview} muted loop playsInline controls preload="metadata" /> : <img src={shown.preview} alt={shown.title} />}
+              </div>
+              <div className="meta"><span className="mono">{shown.title} · {shown.seconds}s</span></div>
+            </div>
+            <RecastCard job={paired} snap={shown} />
+          </div>
+          {recent.length > 0 && (
+            <div className="card pad stack">
+              <span className="mono">Recent swaps</span>
+              <div className="result-grid">{recent.map((j) => <JobCard key={j.id} job={j} />)}</div>
+            </div>
+          )}
+        </div>
       </div>
     </>
+  );
+}
+
+function RecastCard({ job, snap }: { job?: Job; snap: Snap }) {
+  const out = job?.status === "done" ? job.outputs[0] : undefined;
+  return (
+    <div className="result recast">
+      <div className="frame" style={{ aspectRatio: snap.aspect }}>
+        <span className="tag">RECAST</span>
+        {!job && <div className="empty">Your recast appears here.</div>}
+        {job && (job.status === "queued" || job.status === "running") && <div className="pending"><div className="spinner" /></div>}
+        {job?.status === "failed" && <div className="empty err">{job.error || "Failed"}</div>}
+        {out && <Media o={out} ratio={snap.ratio} />}
+      </div>
+      <div className="meta">
+        <span className="mono">{job ? `${snap.castLabel} · 1080p` : "Recast"}</span>
+        {out && (out.url.startsWith("/")
+          ? <a className="btn sm" href={out.url} download={downloadName(job!, out, 0)}>Download</a>
+          : <a className="btn sm" href={out.url} target="_blank" rel="noreferrer">Open</a>)}
+      </div>
+    </div>
   );
 }

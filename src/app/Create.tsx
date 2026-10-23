@@ -24,7 +24,7 @@ export function CreatePage() {
     <>
       <div className="page-head"><div><span className="mono">Create</span><h2>Idea to image to <em>video.</em></h2></div></div>
       <div className="studio-layout">
-        <div className="card pad stack">
+        <div className="card pad stack form-card">
           <div className="seg" role="tablist">
             <button className={kind === "image" ? "on" : ""} onClick={() => setKind("image")}>Image</button>
             <button className={kind === "video" ? "on" : ""} onClick={() => setKind("video")}>Video</button>
@@ -59,7 +59,7 @@ export function CreatePage() {
           </label>
           {kind === "video" && <div className="stack" style={{ gap: 6 }}><span className="note">Start frame (optional, image-to-video)</span><Uploader label="Add a start frame" max={1} multiple={false} value={frame} onChange={setFrame} /></div>}
           {error && <div className="err">{error}</div>}
-          <button className="btn primary lg" disabled={busy || !prompt.trim()} onClick={() => run({ kind, model: modelId, prompt, ratio, count, seconds, characterId: characterId || undefined, images: frame })}>
+          <button className="btn primary lg gen-cta" disabled={busy || !prompt.trim()} onClick={() => run({ kind, model: modelId, prompt, ratio, count, seconds, characterId: characterId || undefined, images: frame })}>
             {busy ? "Submitting…" : "Generate"}
           </button>
         </div>
