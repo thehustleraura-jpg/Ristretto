@@ -160,6 +160,16 @@ textarea.in { resize: vertical; min-height: 96px; }
 .tabbar a span { font-size: 18px; line-height: 1.2; }
 .tabbar a.on { color: var(--accent); }
 
+/* mobile chip row + picker sheet on Create */
+.chip-row, .sheet-wrap { display: none; }
+.pchip { flex-shrink: 0; min-height: 44px; padding: 10px 16px; border-radius: 99px; border: 1px solid var(--line-2); background: transparent; color: #b4b0a7; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.pchip.on { border-color: var(--accent); background: rgba(224, 161, 95, 0.12); color: var(--accent-2); }
+.sheet { position: fixed; left: 0; right: 0; bottom: 0; max-height: 70vh; overflow: auto; display: grid; gap: 12px; padding: 16px 16px calc(20px + env(safe-area-inset-bottom)); background: var(--card); border-top: 1px solid var(--line-2); border-radius: 20px 20px 0 0; }
+.sheet-opts { display: grid; gap: 8px; }
+.sheet-opts button { text-align: left; min-height: 48px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; cursor: pointer; font-size: 15px; }
+.sheet-opts button.on { border-color: var(--accent); }
+.sheet-opts small { color: var(--muted); display: block; font-size: 12px; }
+
 /* reference vs recast */
 .pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
 .pair .result.recast { border-color: var(--accent); }
@@ -187,6 +197,10 @@ textarea.in { resize: vertical; min-height: 96px; }
   .page-head h2 { font-size: 34px; }
   .result-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .form-card { overflow: visible; }
+  .desk-only { display: none !important; }
+  .chip-row { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 0 -22px; padding: 0 22px; }
+  .chip-row::-webkit-scrollbar { display: none; }
+  .sheet-wrap { display: block; position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, 0.55); }
   .gen-cta { position: sticky; bottom: 86px; z-index: 5; box-shadow: 0 0 0 8px var(--card); }
   .with-panel { grid-template-columns: 1fr; }
   .panel { position: static; order: -1; }
