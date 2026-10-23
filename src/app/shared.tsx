@@ -1,9 +1,17 @@
 import { useCallback, useRef, useState } from "react";
 import { submitJob, uploadFile, waitForJob, type Job, type Output } from "../lib/api";
 
-export function Media({ o }: { o: Output }) {
-  if (o.type === "video" && !o.mock) return <video src={o.url} controls loop playsInline />;
+export function Media({ o, ratio }: { o: Output; ratio?: string }) {
+  if (o.type === "video" && !o.mock) {
+    const ar = ratio && /^\d+:\d+$/.test(ratio) ? ratio.replace(":", " / ") : undefined;
+    return <video className="player" src={o.url} controls loop playsInline preload="metadata" style={{ aspectRatio: ar }} />;
+  }
   return <img src={o.url} alt="" loading="lazy" />;
+}
+
+function downloadName(job: Job, o: Output, i: number) {
+  const ext = o.url.split("?")[0].split(".").pop() || (o.type === "video" ? "mp4" : "png");
+  return `ristretto-${job.spec}-${job.id.replace(/^job_/, "")}${job.outputs.length > 1 ? `-${i + 1}` : ""}.${ext}`;
 }
 
 export function JobCard({ job }: { job: Job }) {
@@ -14,10 +22,12 @@ export function JobCard({ job }: { job: Job }) {
       {job.status === "failed" && <div className="result"><div className="pending err" style={{ padding: 16, textAlign: "center" }}>{job.error || "Failed"}</div></div>}
       {job.status === "done" && job.outputs.map((o, i) => (
         <div className="result" key={`${job.id}-${i}`}>
-          <Media o={o} />
+          <Media o={o} ratio={job.input.ratio} />
           <div className="meta">
             <span className="mono">{o.mock ? "mock render" : job.spec}</span>
-            <a className="btn sm" href={o.url} download target="_blank" rel="noreferrer">Download</a>
+            {o.url.startsWith("/")
+              ? <a className="btn sm" href={o.url} download={downloadName(job, o, i)}>Download</a>
+              : <a className="btn sm" href={o.url} target="_blank" rel="noreferrer">Open</a>}
           </div>
         </div>
       ))}

@@ -76,6 +76,28 @@ function extract(result) {
   return out;
 }
 
+const EXT_BY_MIME = { "video/mp4": "mp4", "video/webm": "webm", "video/quicktime": "mov", "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
+
+// Copies provider outputs into FILES_DIR so they are served same-origin (download + range seeking)
+// and outlive the provider's CDN. If a copy fails, the remote URL is kept.
+async function saveLocally(outs, { FILES_DIR, uid }) {
+  return Promise.all(outs.map(async (o) => {
+    if (!/^https?:\/\//.test(o.url)) return o;
+    try {
+      const r = await fetch(o.url);
+      if (!r.ok) throw new Error(String(r.status));
+      const mime = (r.headers.get("content-type") || "").split(";")[0].trim();
+      const urlExt = path.extname(new URL(o.url).pathname).slice(1).toLowerCase();
+      const ext = EXT_BY_MIME[mime] || (/^[a-z0-9]{2,4}$/.test(urlExt) ? urlExt : o.type === "video" ? "mp4" : "png");
+      const name = `${uid("out")}.${ext}`;
+      fs.writeFileSync(path.join(FILES_DIR, name), Buffer.from(await r.arrayBuffer()));
+      return { ...o, url: `/files/${name}` };
+    } catch {
+      return o;
+    }
+  }));
+}
+
 const fal = {
   name: "fal",
   async run(job, ctx) {
@@ -95,7 +117,7 @@ const fal = {
         if (!r.ok) throw new Error(`Provider error (${r.status})`);
         const outs = extract(await r.json());
         if (!outs.length) throw new Error("Provider returned no output");
-        return outs;
+        return saveLocally(outs, ctx);
       }
       if (s.status === "FAILED" || s.error) throw new Error("Generation failed at the provider");
     }

@@ -128,9 +128,10 @@ textarea.in { resize: vertical; min-height: 96px; }
 .banner { border: 1px dashed var(--line-2); border-radius: 12px; padding: 10px 14px; color: var(--muted); font-size: 13px; margin-bottom: 20px; }
 .banner b { color: var(--accent); }
 .studio-layout { display: grid; grid-template-columns: 380px 1fr; gap: 20px; align-items: start; }
-.result-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+.result-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; align-items: start; }
 .result { border-radius: var(--r); overflow: hidden; border: 1px solid var(--line); background: var(--card); position: relative; }
 .result img, .result video { width: 100%; display: block; }
+.result video.player { background: #000; object-fit: contain; max-height: 70vh; }
 .result .meta { padding: 10px 12px; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
 .result .pending { aspect-ratio: 1; display: grid; place-items: center; color: var(--muted); }
 .spinner { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--accent); animation: spin 0.8s linear infinite; }
