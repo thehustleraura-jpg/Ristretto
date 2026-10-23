@@ -37,10 +37,13 @@ Endpoint ids live in `server/catalog.mjs` (`fal` field per model and tool). They
 | `PROVIDER` / `FAL_KEY` | Enable the fal.ai provider |
 | `FAL_VIDEOZYPHER_ENDPOINT` | Video-to-video endpoint for Reference Swap |
 
+## Community
+
+Press **Share** on any finished render in History to add it to Community. Shared pieces are public: `GET /api/community` needs no sign-in, and the landing page shows the latest 8 (sample art until something is shared). It exposes only the output, prompt, model and ratio. Unshare from History or Community; deleting a job also removes its shares.
+
 ## Not built yet
 
 - **Reference Swap library clips** are placeholders. Real renders need an uploaded clip, or real video URLs added to `REFERENCES`.
-- **Community feed** is static sample content.
 - **Team seats** and character LoRA training are not implemented. Characters are sent as reference images.
 - **Database** is a single JSON file, fine for one instance. Move to Postgres/SQLite before running more than one server.
 

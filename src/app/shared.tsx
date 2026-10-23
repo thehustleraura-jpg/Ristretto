@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { submitJob, uploadFile, waitForJob, type Job, type Output } from "../lib/api";
+import { submitJob, uploadFile, useCatalog, waitForJob, type Job, type Output } from "../lib/api";
 
 export function Media({ o, ratio }: { o: Output; ratio?: string }) {
   if (o.type === "video" && !o.mock) {
@@ -14,7 +14,13 @@ export function downloadName(job: Job, o: Output, i: number) {
   return `ristretto-${job.spec}-${job.id.replace(/^job_/, "")}${job.outputs.length > 1 ? `-${i + 1}` : ""}.${ext}`;
 }
 
-export function JobCard({ job }: { job: Job }) {
+/** Display name for a job's model, tool or mode. */
+export function useSpecName() {
+  const { models, tools } = useCatalog();
+  return (spec: string) => (spec === "videozypher" ? "Reference Swap" : models.find((m) => m.id === spec)?.name || tools.find((t) => t.id === spec)?.name || spec);
+}
+
+export function JobCard({ job, onShare }: { job: Job; onShare?: (job: Job, index: number) => void }) {
   const pending = job.status === "queued" || job.status === "running";
   return (
     <>
@@ -25,6 +31,11 @@ export function JobCard({ job }: { job: Job }) {
           <Media o={o} ratio={job.input.ratio} />
           <div className="meta">
             <span className="mono">{o.mock ? "mock render" : job.spec}</span>
+            {onShare && (
+              <button className={`btn sm ${job.shares?.[i] ? "shared" : ""}`} aria-pressed={!!job.shares?.[i]} onClick={() => onShare(job, i)}>
+                {job.shares?.[i] ? "Shared" : "Share"}
+              </button>
+            )}
             {o.url.startsWith("/")
               ? <a className="btn sm" href={o.url} download={downloadName(job, o, i)}>Download</a>
               : <a className="btn sm" href={o.url} target="_blank" rel="noreferrer">Open</a>}

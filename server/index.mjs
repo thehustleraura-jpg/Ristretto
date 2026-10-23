@@ -28,6 +28,7 @@ const DB_FILE = path.join(DATA_DIR, "db.json");
 let db = fs.existsSync(DB_FILE)
   ? JSON.parse(fs.readFileSync(DB_FILE, "utf8"))
   : { users: [], characters: [], jobs: [] };
+db.shares ||= []; // { id, userId, jobId, index, sharedAt }: one per output the owner shared to Community
 let saveTimer = null;
 function save() {
   clearTimeout(saveTimer);
@@ -199,7 +200,8 @@ async function run(job) {
   save();
 }
 
-const pubJob = (j) => ({ id: j.id, kind: j.kind, spec: j.spec, status: j.status, createdAt: j.createdAt, finishedAt: j.finishedAt, input: { prompt: j.input.prompt, ratio: j.input.ratio, seconds: j.input.seconds, studio: j.input.studio, characterName: j.input.characterName }, outputs: j.outputs, error: j.error });
+const sharesOf = (jobId) => Object.fromEntries(db.shares.filter((s) => s.jobId === jobId).map((s) => [s.index, s.id]));
+const pubJob = (j) => ({ id: j.id, kind: j.kind, spec: j.spec, status: j.status, createdAt: j.createdAt, finishedAt: j.finishedAt, input: { prompt: j.input.prompt, ratio: j.input.ratio, seconds: j.input.seconds, studio: j.input.studio, characterName: j.input.characterName }, outputs: j.outputs, error: j.error, shares: sharesOf(j.id) });
 
 app.get("/api/jobs/:id", auth, (req, res) => {
   const job = db.jobs.find((j) => j.id === req.params.id && j.userId === req.user.id);
@@ -212,8 +214,42 @@ app.get("/api/history", auth, (req, res) => {
 });
 app.delete("/api/jobs/:id", auth, (req, res) => {
   db.jobs = db.jobs.filter((j) => !(j.id === req.params.id && j.userId === req.user.id));
+  db.shares = db.shares.filter((s) => !(s.jobId === req.params.id && s.userId === req.user.id));
   save();
   res.json({ ok: true });
+});
+
+/* ---------- community: owner shares outputs from History; the feed is public ---------- */
+app.post("/api/shares", auth, (req, res) => {
+  const { jobId } = req.body || {};
+  const index = Number(req.body?.index ?? 0);
+  const job = db.jobs.find((j) => j.id === jobId && j.userId === req.user.id);
+  if (!job || job.status !== "done" || !Number.isInteger(index) || !job.outputs[index]) return res.status(404).json({ error: "Nothing to share" });
+  let share = db.shares.find((s) => s.jobId === job.id && s.index === index);
+  if (!share) {
+    share = { id: uid("shr"), userId: req.user.id, jobId: job.id, index, sharedAt: Date.now() };
+    db.shares.push(share);
+    save();
+  }
+  res.json({ share: { id: share.id, jobId: share.jobId, index: share.index } });
+});
+app.delete("/api/shares/:id", auth, (req, res) => {
+  db.shares = db.shares.filter((s) => !(s.id === req.params.id && s.userId === req.user.id));
+  save();
+  res.json({ ok: true });
+});
+app.get("/api/community", (req, res) => {
+  const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 60));
+  const items = [];
+  for (const s of [...db.shares].sort((a, b) => b.sharedAt - a.sharedAt)) {
+    const job = db.jobs.find((j) => j.id === s.jobId);
+    const out = job?.outputs[s.index];
+    if (!out) continue;
+    // Only what the piece needs: no user, character or input-image details.
+    items.push({ id: s.id, kind: job.kind, spec: job.spec, prompt: job.input.prompt, ratio: job.input.ratio, output: out, sharedAt: s.sharedAt });
+    if (items.length >= limit) break;
+  }
+  res.json({ items });
 });
 
 /* ---------- static client in production ---------- */

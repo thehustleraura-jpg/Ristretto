@@ -1,24 +1,44 @@
-import { placeholder } from "../lib/api";
-
-const PROMPTS = [
-  "Neon-lit ramen counter, rain on the window, 35mm", "Astronaut reading in a greenhouse, soft morning light", "Studio shot of a ceramic teapot, matte black, rim light",
-  "Street style, camel coat, autumn leaves, Paris", "Macro of dew on a spiderweb at sunrise", "Retro-futurist kitchen, pastel palette, wide angle",
-  "Portrait of a sailor, weathered skin, window light", "Isometric tiny island with a lighthouse", "Dancer mid-leap in an empty warehouse, long exposure",
-  "Cozy reading nook with a sleeping cat", "Product flat-lay: sunscreen, shells, sand", "Cinematic desert road at blue hour",
-];
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { api, type CommunityItem } from "../lib/api";
+import { Media, useSpecName } from "./shared";
 
 export function CommunityPage() {
+  const [items, setItems] = useState<CommunityItem[] | null>(null);
+  const [err, setErr] = useState("");
+  const specName = useSpecName();
+  useEffect(() => { api<{ items: CommunityItem[] }>("/api/community").then((r) => setItems(r.items)).catch((e) => setErr(e.message)); }, []);
+
+  async function unshare(id: string) {
+    setErr("");
+    try {
+      await api(`/api/shares/${id}`, { method: "DELETE" });
+      setItems((list) => (list || []).filter((x) => x.id !== id));
+    } catch (e: any) { setErr(e.message); }
+  }
+
   return (
     <>
-      <div className="page-head"><div><span className="mono">Community</span><h2>Made by the <em>community.</em></h2><p className="note" style={{ margin: "6px 0 0" }}>Sample feed. Sharing from History is not built yet.</p></div></div>
-      <div className="grid g4">
-        {PROMPTS.map((p, i) => (
-          <div key={p} className="card">
-            <img src={placeholder(300 + i, i % 3 === 0 ? "4:5" : "1:1")} alt="" />
-            <div className="body"><p style={{ margin: 0 }}>{p}</p></div>
-          </div>
-        ))}
-      </div>
+      <div className="page-head"><div><span className="mono">Community</span><h2>Made by the <em>community.</em></h2><p className="note" style={{ margin: "6px 0 0" }}>Pieces you share from History. Shared pieces are public and appear on the landing page.</p></div></div>
+      {err && <div className="err" style={{ marginBottom: 12 }}>{err}</div>}
+      {items === null ? <div className="spinner" /> : items.length === 0 ? (
+        <div className="card pad note">Nothing shared yet. Open <Link to="/app/history" style={{ color: "var(--accent)" }}>History</Link> and press Share on a render.</div>
+      ) : (
+        <div className="result-grid">
+          {items.map((it) => (
+            <div key={it.id} className="result">
+              <Media o={it.output} ratio={it.ratio} />
+              <div className="body" style={{ padding: "12px 12px 0" }}>
+                {it.prompt && <p style={{ margin: 0, fontSize: 14 }}>{it.prompt}</p>}
+              </div>
+              <div className="meta">
+                <span className="mono">{specName(it.spec)}</span>
+                <button className="btn sm" onClick={() => unshare(it.id)}>Unshare</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </>
   );
 }

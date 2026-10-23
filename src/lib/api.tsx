@@ -8,7 +8,8 @@ export type Reference = { id: string; title: string; tag: string; seconds: numbe
 export type Catalog = { brand: string; provider: string; models: Model[]; tools: Tool[]; studios: Studio[]; references: Reference[] };
 export type User = { id: string; email: string; name: string };
 export type Output = { type: "image" | "video"; url: string; mock?: boolean };
-export type Job = { id: string; kind: string; spec: string; status: "queued" | "running" | "done" | "failed"; createdAt: number; input: { prompt: string; ratio: string; seconds: number; studio: string | null; characterName?: string }; outputs: Output[]; error: string | null };
+export type Job = { id: string; kind: string; spec: string; status: "queued" | "running" | "done" | "failed"; createdAt: number; input: { prompt: string; ratio: string; seconds: number; studio: string | null; characterName?: string }; outputs: Output[]; error: string | null; shares?: Record<string, string> };
+export type CommunityItem = { id: string; kind: string; spec: string; prompt: string; ratio: string; output: Output; sharedAt: number };
 export type Character = { id: string; number: string; name: string; description: string; images: string[]; locked: boolean };
 
 const KEY = "ristretto.token";

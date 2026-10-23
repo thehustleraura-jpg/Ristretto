@@ -1,10 +1,14 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { placeholder, useCatalog } from "../lib/api";
+import { api, placeholder, useCatalog, type CommunityItem } from "../lib/api";
 import { Section, SiteFooter, SiteNav } from "../components/Site";
 
 export function Landing() {
   const { models, studios, tools, brand } = useCatalog();
   const ticker = models.slice(0, 12);
+  // Latest pieces shared from History; sample art until something is shared.
+  const [shared, setShared] = useState<CommunityItem[] | null>(null);
+  useEffect(() => { api<{ items: CommunityItem[] }>("/api/community?limit=8").then((r) => setShared(r.items)).catch(() => setShared([])); }, []);
   return (
     <>
       <SiteNav />
@@ -71,7 +75,9 @@ export function Landing() {
 
       <Section num="05 · COMMUNITY" title={<>Made by the <em>community.</em></>} intro="A daily feed of what creators make here. Every piece started as a prompt.">
         <div className="grid g4">
-          {Array.from({ length: 8 }, (_, i) => <div key={i} className="card"><img src={placeholder(200 + i, i % 2 ? "4:5" : "1:1")} alt="" /></div>)}
+          {shared && shared.length > 0
+            ? shared.map((it) => <div key={it.id} className="card">{it.output.type === "video" && !it.output.mock ? <video src={it.output.url} muted loop playsInline autoPlay preload="metadata" /> : <img src={it.output.url} alt={it.prompt} loading="lazy" />}</div>)
+            : Array.from({ length: 8 }, (_, i) => <div key={i} className="card"><img src={placeholder(200 + i, i % 2 ? "4:5" : "1:1")} alt="" /></div>)}
         </div>
       </Section>
 

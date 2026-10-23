@@ -53,6 +53,7 @@ section.block { padding: 96px 0; border-top: 1px solid var(--line); }
 .btn.sm { padding: 6px 14px; font-size: 13px; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn.danger { color: var(--danger); }
+.btn.shared { border-color: var(--accent); color: var(--accent-2); }
 
 /* hero */
 .hero { padding: 90px 0 70px; text-align: center; }
@@ -133,6 +134,8 @@ textarea.in { resize: vertical; min-height: 96px; }
 .result img, .result video { width: 100%; display: block; }
 .result video.player { background: #000; object-fit: contain; max-height: 70vh; }
 .result .meta { padding: 10px 12px; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.result .meta { flex-wrap: wrap; }
+.result .meta .mono { flex: 1 1 auto; }
 .result .pending { aspect-ratio: 1; display: grid; place-items: center; color: var(--muted); }
 .spinner { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--accent); animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
