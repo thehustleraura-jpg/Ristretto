@@ -1,16 +1,17 @@
-// Netlify build step: proxy /api and /files to the Express backend, then fall back to the SPA.
+// Netlify build step: route /api to the api function and /files to the public Supabase Storage bucket, then fall back to the SPA.
 // Netlify can't read env vars inside redirect rules, so the rules are written into dist/_redirects here.
 import fs from "node:fs";
 
-const api = (process.env.RISTRETTO_API_URL || "").trim().replace(/\/+$/, "");
-if (!/^https:\/\/[^/\s]+$/.test(api)) {
-  console.error("Set RISTRETTO_API_URL to the backend's https origin (e.g. https://ristretto-api.onrender.com) in the Netlify site's environment variables.");
+const supabase = (process.env.SUPABASE_URL || "").trim().replace(/\/+$/, "");
+const bucket = process.env.SUPABASE_BUCKET || "ristretto";
+if (!/^https:\/\/[^/\s]+$/.test(supabase)) {
+  console.error("Set SUPABASE_URL (e.g. https://abcd1234.supabase.co) in the Netlify project's environment variables, with the Builds scope.");
   process.exit(1);
 }
 fs.writeFileSync("dist/_redirects", [
-  `/api/*    ${api}/api/:splat    200`,
-  `/files/*  ${api}/files/:splat  200`,
-  `/*        /index.html         200`,
+  `/api/*    /.netlify/functions/api/:splat    200`,
+  `/files/*  ${supabase}/storage/v1/object/public/${bucket}/:splat  200`,
+  `/*        /index.html  200`,
   "",
 ].join("\n"));
-console.log(`dist/_redirects: /api and /files -> ${api}`);
+console.log(`dist/_redirects: /api -> function, /files -> ${supabase} (${bucket})`);

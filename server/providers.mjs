@@ -1,46 +1,40 @@
-import fs from "node:fs";
 import path from "node:path";
 import { placeholderSvg } from "./placeholder.mjs";
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Providers are stateless so they can run inside short-lived functions:
+//   submit(job, ctx) -> { status: "done", outputs } | { status: "running", provider }   (provider = queue handle, stored on the job)
+//   check(job, ctx)  -> { status: "running" } | { status: "completed", outputs } | { status: "failed", error }
+// ctx = { MODELS, TOOLS, files, uid }. Finished remote outputs are copied into storage with saveOutputs().
 
 /* ---------------- mock: no keys needed, produces placeholder art ---------------- */
 const mock = {
   name: "mock",
-  async run(job, { FILES_DIR, uid }) {
-    await sleep(1500 + Math.random() * 1500);
-    const outs = [];
+  async submit(job, { files, uid }) {
+    const outputs = [];
     const isVideo = job.kind === "video" || job.kind === "videozypher" || (job.kind === "tool" && job.spec === "lipsync");
     const n = job.kind === "image" ? job.input.count : 1;
     for (let i = 0; i < n; i++) {
       const name = `${uid("out")}.svg`;
       const label = `${job.kind}:${job.spec} · mock`;
-      fs.writeFileSync(path.join(FILES_DIR, name), placeholderSvg(`${job.id}-${i}`, { ratio: job.input.ratio, label, video: isVideo ? "1" : "0" }));
-      outs.push({ type: isVideo ? "video" : "image", url: `/files/${name}`, mock: true });
+      await files.put(name, Buffer.from(placeholderSvg(`${job.id}-${i}`, { ratio: job.input.ratio, label, video: isVideo ? "1" : "0" })), "image/svg+xml");
+      outputs.push({ type: isVideo ? "video" : "image", url: `/files/${name}`, mock: true });
     }
-    return outs;
+    return { status: "done", outputs };
+  },
+  async check() {
+    return { status: "failed", error: "Mock jobs finish on submit" };
   },
 };
 
 /* ---------------- fal.ai: set FAL_KEY and PROVIDER=fal ---------------- */
-const FAL_BASE = "https://queue.fal.run";
+const FAL_BASE = process.env.FAL_QUEUE_URL || "https://queue.fal.run"; // override only for testing
 
-function toRemote(url, FILES_DIR) {
-  // Local uploads are sent as data URIs; remote URLs pass through.
-  if (!url) return url;
-  if (url.startsWith("/files/")) {
-    const file = path.join(FILES_DIR, path.basename(url));
-    const ext = path.extname(file).slice(1).toLowerCase();
-    const mime = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm", mp3: "audio/mpeg", wav: "audio/wav", m4a: "audio/mp4" }[ext] || "application/octet-stream";
-    return `data:${mime};base64,${fs.readFileSync(file).toString("base64")}`;
-  }
-  return url;
-}
+// Our files become URLs the provider can fetch (public storage URL, or a data URI for local disk); remote URLs pass through.
+const toRemote = (url, files) => (url && url.startsWith("/files/") ? files.publicUrl(path.basename(url)) : url);
 
 function buildInput(job, ctx) {
-  const { FILES_DIR } = ctx;
   const i = job.input;
-  const ref = (u) => toRemote(u, FILES_DIR);
+  const ref = (u) => toRemote(u, ctx.files);
   const characterRefs = (i.characterImages || []).map(ref);
   const base = { prompt: i.prompt, aspect_ratio: i.ratio };
   if (job.kind === "image") {
@@ -78,9 +72,9 @@ function extract(result) {
 
 const EXT_BY_MIME = { "video/mp4": "mp4", "video/webm": "webm", "video/quicktime": "mov", "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
 
-// Copies provider outputs into FILES_DIR so they are served same-origin (download + range seeking)
+// Copies provider outputs into our storage so they are served same-origin under /files (download + range seeking)
 // and outlive the provider's CDN. If a copy fails, the remote URL is kept.
-async function saveLocally(outs, { FILES_DIR, uid }) {
+export async function saveOutputs(outs, { files, uid }) {
   return Promise.all(outs.map(async (o) => {
     if (!/^https?:\/\//.test(o.url)) return o;
     try {
@@ -90,7 +84,7 @@ async function saveLocally(outs, { FILES_DIR, uid }) {
       const urlExt = path.extname(new URL(o.url).pathname).slice(1).toLowerCase();
       const ext = EXT_BY_MIME[mime] || (/^[a-z0-9]{2,4}$/.test(urlExt) ? urlExt : o.type === "video" ? "mp4" : "png");
       const name = `${uid("out")}.${ext}`;
-      fs.writeFileSync(path.join(FILES_DIR, name), Buffer.from(await r.arrayBuffer()));
+      await files.put(name, Buffer.from(await r.arrayBuffer()), mime || (o.type === "video" ? "video/mp4" : "image/png"));
       return { ...o, url: `/files/${name}` };
     } catch {
       return o;
@@ -98,30 +92,32 @@ async function saveLocally(outs, { FILES_DIR, uid }) {
   }));
 }
 
+const falHeaders = () => ({ Authorization: `Key ${process.env.FAL_KEY}`, "Content-Type": "application/json" });
+const JOB_TIMEOUT = 1000 * 60 * 15;
+
 const fal = {
   name: "fal",
-  async run(job, ctx) {
-    const key = process.env.FAL_KEY;
+  async submit(job, ctx) {
     const endpoint = endpointFor(job, ctx);
     if (!endpoint) throw new Error("No endpoint configured for this model");
-    const headers = { Authorization: `Key ${key}`, "Content-Type": "application/json" };
-    const submit = await fetch(`${FAL_BASE}/${endpoint}`, { method: "POST", headers, body: JSON.stringify(buildInput(job, ctx)) });
-    if (!submit.ok) throw new Error(`Provider rejected the request (${submit.status})`);
-    const { status_url, response_url } = await submit.json();
-    const deadline = Date.now() + 1000 * 60 * 10;
-    while (Date.now() < deadline) {
-      await sleep(2500);
-      const s = await (await fetch(status_url, { headers })).json();
-      if (s.status === "COMPLETED") {
-        const r = await fetch(response_url, { headers });
-        if (!r.ok) throw new Error(`Provider error (${r.status})`);
-        const outs = extract(await r.json());
-        if (!outs.length) throw new Error("Provider returned no output");
-        return saveLocally(outs, ctx);
-      }
-      if (s.status === "FAILED" || s.error) throw new Error("Generation failed at the provider");
+    const r = await fetch(`${FAL_BASE}/${endpoint}`, { method: "POST", headers: falHeaders(), body: JSON.stringify(buildInput(job, ctx)) });
+    if (!r.ok) throw new Error(`Provider rejected the request (${r.status})`);
+    const { request_id, status_url, response_url } = await r.json();
+    return { status: "running", provider: { request_id, status_url, response_url } };
+  },
+  async check(job) {
+    const p = job.provider;
+    if (!p?.status_url) return { status: "failed", error: "Lost track of this job at the provider" };
+    const s = await (await fetch(p.status_url, { headers: falHeaders() })).json();
+    if (s.status === "COMPLETED") {
+      const r = await fetch(p.response_url, { headers: falHeaders() });
+      if (!r.ok) return { status: "failed", error: `Provider error (${r.status})` };
+      const outputs = extract(await r.json());
+      return outputs.length ? { status: "completed", outputs } : { status: "failed", error: "Provider returned no output" };
     }
-    throw new Error("Generation timed out");
+    if (s.status === "FAILED" || s.error) return { status: "failed", error: "Generation failed at the provider" };
+    if (Date.now() - job.createdAt > JOB_TIMEOUT) return { status: "failed", error: "Generation timed out" };
+    return { status: "running" };
   },
 };
 
@@ -129,3 +125,6 @@ export function getProvider() {
   if (process.env.PROVIDER === "fal" && process.env.FAL_KEY) return fal;
   return mock;
 }
+
+// The provider a job was submitted to, even if PROVIDER has changed since.
+export const providerFor = (name) => ({ fal, mock })[name] || getProvider();

@@ -1,6 +1,11 @@
-# Netlify hosts the built frontend only. The Express + SQLite server runs on a host with a
-# persistent disk; set RISTRETTO_API_URL (its https origin) in the Netlify environment variables.
+# Netlify serves the built client and runs the API as a function (netlify/functions/api.mjs).
+# Data lives in Supabase Postgres, files in Supabase Storage. Required environment variables
+# (Netlify UI, scopes Builds + Functions): APP_SECRET, DATABASE_URL, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
 [build]
   command = "npm run build && node scripts/netlify-redirects.mjs"
   publish = "dist"
   environment = { NODE_VERSION = "22" }
+
+[functions]
+  node_bundler = "esbuild"
+  external_node_modules = ["express"]

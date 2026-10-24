@@ -8,15 +8,16 @@
     "dev:server": "node --watch server/index.mjs",
     "dev:client": "vite",
     "build": "tsc --noEmit && vite build",
-    "start": "NODE_ENV=production node server/index.mjs"
+    "start": "NODE_ENV=production node server/index.mjs",
+    "db:setup": "node scripts/db-setup.mjs"
   },
   "dependencies": {
-    "better-sqlite3": "^12.11.1",
     "express": "^4.21.2",
-    "multer": "^2.5.0",
+    "postgres": "^3.4.9",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.28.0"
+    "react-router-dom": "^6.28.0",
+    "serverless-http": "^4.0.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",

@@ -29,10 +29,14 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
 
 export const placeholder = (seed: string | number, ratio = "1:1", label = "") => `/api/placeholder/${seed}.svg?ratio=${encodeURIComponent(ratio)}${label ? `&label=${encodeURIComponent(label)}` : ""}`;
 
+// Two steps: the API hands out a short-lived signed URL, then the file goes straight to storage
+// (Netlify functions can't take request bodies over ~4.5 MB).
 export async function uploadFile(file: File): Promise<string> {
-  const f = new FormData();
-  f.append("file", file);
-  const r = await api<{ url: string }>("/api/upload", { form: f });
+  const r = await api<{ url: string; upload: { url: string; method: string; headers: Record<string, string> } }>("/api/uploads", {
+    body: { name: file.name, type: file.type, size: file.size },
+  });
+  const put = await fetch(r.upload.url, { method: r.upload.method, headers: r.upload.headers, body: file });
+  if (!put.ok) throw new Error(`Upload failed (${put.status})`);
   return r.url;
 }
 
@@ -79,7 +83,7 @@ export async function waitForJob(id: string, onTick?: (j: Job) => void): Promise
     const r = await api<{ job: Job }>(`/api/jobs/${id}`);
     onTick?.(r.job);
     if (r.job.status === "done" || r.job.status === "failed") return r.job;
-    await new Promise((res) => setTimeout(res, 1500));
+    await new Promise((res) => setTimeout(res, 2500));
   }
   throw new Error("Timed out waiting for the job");
 }
