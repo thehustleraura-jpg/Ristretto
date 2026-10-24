@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { BRAND, MODELS, TOOLS, STUDIOS, REFERENCES } from "./catalog.mjs";
 import { getProvider } from "./providers.mjs";
 import { placeholderSvg } from "./placeholder.mjs";
+import { openStore } from "./store.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -23,17 +24,8 @@ const SECRET = process.env.APP_SECRET || (() => {
   return s;
 })();
 
-/* ---------- tiny JSON store ---------- */
-const DB_FILE = path.join(DATA_DIR, "db.json");
-let db = fs.existsSync(DB_FILE)
-  ? JSON.parse(fs.readFileSync(DB_FILE, "utf8"))
-  : { users: [], characters: [], jobs: [] };
-db.shares ||= []; // { id, userId, jobId, index, sharedAt }: one per output the owner shared to Community
-let saveTimer = null;
-function save() {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => fs.writeFileSync(DB_FILE, JSON.stringify(db)), 50);
-}
+/* ---------- SQLite store (DATA_DIR/ristretto.db; imports an old db.json once) ---------- */
+const store = openStore(DATA_DIR);
 const uid = (p) => `${p}_${crypto.randomBytes(6).toString("hex")}`;
 
 /* ---------- auth ---------- */
@@ -59,7 +51,7 @@ const publicUser = (u) => ({ id: u.id, email: u.email, name: u.name });
 function auth(req, res, next) {
   const h = req.headers.authorization || "";
   const userId = verify(h.startsWith("Bearer ") ? h.slice(7) : "");
-  const user = db.users.find((u) => u.id === userId);
+  const user = userId && store.users.byId(userId);
   if (!user) return res.status(401).json({ error: "Not signed in" });
   req.user = user;
   next();
@@ -83,17 +75,16 @@ app.get("/api/catalog", (_req, res) =>
 );
 
 // Single-owner app: the first account created through /api/auth/setup is the owner. After that, setup is closed.
-app.get("/api/auth/status", (_req, res) => res.json({ needsSetup: db.users.length === 0 }));
+app.get("/api/auth/status", (_req, res) => res.json({ needsSetup: store.users.count() === 0 }));
 
 app.post("/api/auth/setup", (req, res) => {
-  if (db.users.length > 0) return res.status(403).json({ error: "Setup is already complete" });
+  if (store.users.count() > 0) return res.status(403).json({ error: "Setup is already complete" });
   const { email, password, name } = req.body || {};
   if (!email || !/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ error: "Enter a valid email" });
   if (!password || password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters" });
   const { salt, hash } = hashPw(password);
   const user = { id: uid("usr"), email, name: name || email.split("@")[0], salt, hash, createdAt: Date.now() };
-  db.users.push(user);
-  save();
+  store.users.insert(user);
   res.json({ token: sign(user.id), user: publicUser(user) });
 });
 
@@ -103,7 +94,7 @@ app.post("/api/auth/login", (req, res) => {
   const rec = attempts.get(ip) || { n: 0, until: 0 };
   if (rec.until > Date.now()) return res.status(429).json({ error: "Too many attempts. Try again in a few minutes." });
   const { email, password } = req.body || {};
-  const user = db.users.find((u) => u.email.toLowerCase() === String(email || "").toLowerCase());
+  const user = store.users.byEmail(String(email || ""));
   let ok = false;
   if (user) {
     const { hash } = hashPw(String(password || ""), user.salt);
@@ -133,19 +124,17 @@ app.post("/api/upload", auth, upload.single("file"), (req, res) => {
 });
 
 /* ---------- characters ---------- */
-app.get("/api/characters", auth, (req, res) => res.json({ characters: db.characters.filter((c) => c.userId === req.user.id) }));
+app.get("/api/characters", auth, (req, res) => res.json({ characters: store.characters.list(req.user.id) }));
 app.post("/api/characters", auth, (req, res) => {
   const { name, description, images } = req.body || {};
   if (!name || !Array.isArray(images) || images.length < 1) return res.status(400).json({ error: "Name and at least one reference image are required" });
-  const n = db.characters.filter((c) => c.userId === req.user.id).length + 1;
+  const n = store.characters.count(req.user.id) + 1;
   const c = { id: uid("chr"), userId: req.user.id, number: String(n).padStart(4, "0"), name: String(name).slice(0, 40), description: String(description || "").slice(0, 400), images: images.slice(0, 6), locked: true, createdAt: Date.now() };
-  db.characters.push(c);
-  save();
+  store.characters.insert(c);
   res.json({ character: c });
 });
 app.delete("/api/characters/:id", auth, (req, res) => {
-  db.characters = db.characters.filter((c) => !(c.id === req.params.id && c.userId === req.user.id));
-  save();
+  store.characters.delete(req.params.id, req.user.id);
   res.json({ ok: true });
 });
 
@@ -176,18 +165,17 @@ app.post("/api/generate", auth, (req, res) => {
     outputs: [], error: null,
   };
   if (job.input.characterId) {
-    const c = db.characters.find((x) => x.id === job.input.characterId && x.userId === req.user.id);
+    const c = store.characters.get(job.input.characterId, req.user.id);
     if (c) { job.input.characterImages = c.images; job.input.characterName = c.name; }
   }
-  db.jobs.push(job);
-  save();
+  store.jobs.insert(job);
   run(job);
   res.json({ job: pubJob(job) });
 });
 
 async function run(job) {
   job.status = "running";
-  save();
+  store.jobs.update(job);
   try {
     const provider = getProvider();
     job.outputs = await provider.run(job, { MODELS, TOOLS, FILES_DIR, uid });
@@ -197,25 +185,23 @@ async function run(job) {
     job.error = String(err?.message || err).slice(0, 300);
   }
   job.finishedAt = Date.now();
-  save();
+  store.jobs.update(job);
 }
 
-const sharesOf = (jobId) => Object.fromEntries(db.shares.filter((s) => s.jobId === jobId).map((s) => [s.index, s.id]));
+const sharesOf = (jobId) => Object.fromEntries(store.shares.forJob(jobId).map((s) => [s.index, s.id]));
 const pubJob = (j) => ({ id: j.id, kind: j.kind, spec: j.spec, status: j.status, createdAt: j.createdAt, finishedAt: j.finishedAt, input: { prompt: j.input.prompt, ratio: j.input.ratio, seconds: j.input.seconds, studio: j.input.studio, characterName: j.input.characterName }, outputs: j.outputs, error: j.error, shares: sharesOf(j.id) });
 
 app.get("/api/jobs/:id", auth, (req, res) => {
-  const job = db.jobs.find((j) => j.id === req.params.id && j.userId === req.user.id);
+  const job = store.jobs.get(req.params.id, req.user.id);
   if (!job) return res.status(404).json({ error: "Not found" });
   res.json({ job: pubJob(job) });
 });
 app.get("/api/history", auth, (req, res) => {
-  const jobs = db.jobs.filter((j) => j.userId === req.user.id).sort((a, b) => b.createdAt - a.createdAt).slice(0, 100).map(pubJob);
+  const jobs = store.jobs.history(req.user.id, 100).map(pubJob);
   res.json({ jobs });
 });
 app.delete("/api/jobs/:id", auth, (req, res) => {
-  db.jobs = db.jobs.filter((j) => !(j.id === req.params.id && j.userId === req.user.id));
-  db.shares = db.shares.filter((s) => !(s.jobId === req.params.id && s.userId === req.user.id));
-  save();
+  store.jobs.delete(req.params.id, req.user.id);
   res.json({ ok: true });
 });
 
@@ -223,33 +209,22 @@ app.delete("/api/jobs/:id", auth, (req, res) => {
 app.post("/api/shares", auth, (req, res) => {
   const { jobId } = req.body || {};
   const index = Number(req.body?.index ?? 0);
-  const job = db.jobs.find((j) => j.id === jobId && j.userId === req.user.id);
+  const job = store.jobs.get(String(jobId || ""), req.user.id);
   if (!job || job.status !== "done" || !Number.isInteger(index) || !job.outputs[index]) return res.status(404).json({ error: "Nothing to share" });
-  let share = db.shares.find((s) => s.jobId === job.id && s.index === index);
+  let share = store.shares.find(job.id, index);
   if (!share) {
     share = { id: uid("shr"), userId: req.user.id, jobId: job.id, index, sharedAt: Date.now() };
-    db.shares.push(share);
-    save();
+    store.shares.insert(share);
   }
   res.json({ share: { id: share.id, jobId: share.jobId, index: share.index } });
 });
 app.delete("/api/shares/:id", auth, (req, res) => {
-  db.shares = db.shares.filter((s) => !(s.id === req.params.id && s.userId === req.user.id));
-  save();
+  store.shares.delete(req.params.id, req.user.id);
   res.json({ ok: true });
 });
 app.get("/api/community", (req, res) => {
   const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 60));
-  const items = [];
-  for (const s of [...db.shares].sort((a, b) => b.sharedAt - a.sharedAt)) {
-    const job = db.jobs.find((j) => j.id === s.jobId);
-    const out = job?.outputs[s.index];
-    if (!out) continue;
-    // Only what the piece needs: no user, character or input-image details.
-    items.push({ id: s.id, kind: job.kind, spec: job.spec, prompt: job.input.prompt, ratio: job.input.ratio, output: out, sharedAt: s.sharedAt });
-    if (items.length >= limit) break;
-  }
-  res.json({ items });
+  res.json({ items: store.shares.feed(limit) }); // only output, prompt, model and ratio: no user, character or input-image details
 });
 
 /* ---------- static client in production ---------- */
